@@ -168,11 +168,18 @@ async def daily_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📅 তারিখ: {date}\n🕒 সময়: {time_now}\nউত্তর দিয়েছেন: {answered} টি\nসঠিক উত্তর: {correct} টি\nসফলতা: {percentage}%"
         )
 
-# Keep server alive
+# Import the keep_alive function to keep the server running
+from keep_alive import keep_alive
+
+# Your bot code...
+
+# Start the server to keep the bot alive
 keep_alive()
 
 # Start the bot
 app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+# Add handlers for commands
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(start_quiz, pattern="^start_"))
 app.add_handler(CallbackQueryHandler(answer_handler, pattern="^answer\|"))
