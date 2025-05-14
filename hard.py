@@ -1,4 +1,4 @@
-questions_hard = [
+questions = [
   {
     "category": "গণিত",
     "question": "পাই (π) এর ৫০টি দশমিকের পরবর্তী মান কেমন হবে?",
