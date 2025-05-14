@@ -1,34 +1,21 @@
 import random
 import asyncio
 from datetime import datetime
-from aiohttp import web
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
-    ApplicationBuilder,
-    CallbackQueryHandler,
-    CommandHandler,
-    ContextTypes
+    ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes
 )
+from aiohttp import web
+
 from easy import questions as easy_questions
 from hard import questions as hard_questions
+from keep_alive import keep_alive  # আপনার ফাইল যদি keep_alive.py থাকে
 
-# --- CONFIGURATION ---
 BOT_TOKEN = "7219397761:AAGzeEKdvR8tc1DkH0zoYtrdxYH8J5eS3Jw"
 GROUP_USERNAME = "@swygenbd"
-ADMIN_ID = 6243881362  # Replace with your Telegram user ID
+ADMIN_ID = 6243881362  # আপনার টেলিগ্রাম ইউজার আইডি দিয়ে পরিবর্তন করুন
 
-# --- Keep Alive (Web Server) ---
-from keep_alive import keep_alive
-async def handle(request):
-    return web.Response(text="Bot is alive")
-
-def keep_alive():
-    app = web.Application()
-    app.router.add_get('/', handle)
-    runner = web.AppRunner(app)
-    return runner
-
-# --- Main Handlers ---
+# /start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat_member = await context.bot.get_chat_member(GROUP_USERNAME, user.id)
@@ -54,15 +41,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
+# Check group join
 async def check_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat_member = await context.bot.get_chat_member(GROUP_USERNAME, user.id)
-
     if chat_member.status in ['member', 'administrator', 'creator']:
         await start(update, context)
     else:
         await update.callback_query.answer("আপনি এখনো গ্রুপে যোগ দেননি!", show_alert=True)
 
+# Send quiz question
 async def send_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE, difficulty):
     questions = easy_questions if difficulty == "easy" else hard_questions
     question = random.choice(questions)
@@ -80,9 +68,9 @@ async def send_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE, difficul
 
     context.user_data['quiz_message'] = msg.message_id
     context.user_data['quiz_chat_id'] = msg.chat.id
-
     asyncio.create_task(countdown_delete(context, msg.chat.id, msg.message_id, 60))
 
+# Countdown to delete quiz message
 async def countdown_delete(context, chat_id, message_id, seconds):
     await asyncio.sleep(seconds)
     try:
@@ -92,6 +80,7 @@ async def countdown_delete(context, chat_id, message_id, seconds):
     context.user_data['current_question'] = None
     await ask_new_question(context, chat_id)
 
+# Ask new question
 async def ask_new_question(context, chat_id):
     user_data = context.user_data
     difficulty = user_data.get('last_difficulty', 'easy')
@@ -112,6 +101,7 @@ async def ask_new_question(context, chat_id):
     user_data['quiz_chat_id'] = msg.chat.id
     asyncio.create_task(countdown_delete(context, msg.chat.id, msg.message_id, 60))
 
+# Handle quiz selection
 async def quiz_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query.data == "easy_quiz":
@@ -119,6 +109,7 @@ async def quiz_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "hard_quiz":
         await send_quiz(update, context, "hard")
 
+# Handle answer
 async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     selected = query.data.split("|")[1]
@@ -130,7 +121,6 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     correct = question['answer']
     msg = query.message
-
     new_buttons = []
     for row in msg.reply_markup.inline_keyboard:
         new_row = []
@@ -161,20 +151,18 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['current_question'] = None
     await ask_new_question(context, msg.chat.id)
 
+# Report handler
 async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     correct = context.user_data.get('correct', 0)
     wrong = context.user_data.get('wrong', 0)
     total = correct + wrong
-    percentage = round((correct / total) * 100) if total > 0 else 0
-
+    percentage = round((correct / total) * 100) if total != 0 else 0
     await update.callback_query.message.reply_text(
-        f"আপনার রিপোর্ট:\n"
-        f"সঠিক উত্তর: {correct}\n"
-        f"ভুল উত্তর: {wrong}\n"
-        f"সফলতা: {percentage}%"
+        f"আপনার রিপোর্ট:\nসঠিক উত্তর: {correct}\nভুল উত্তর: {wrong}\nসফলতা: {percentage}%"
     )
 
+# Feedback handler
 async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=ADMIN_ID,
@@ -182,8 +170,8 @@ async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.callback_query.answer("আপনার ফিডব্যাক পাঠানো হয়েছে!")
 
-# --- Main Entry Point ---
-def main():
+# Main function
+async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -194,12 +182,12 @@ def main():
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^feedback$"))
 
     runner = keep_alive()
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(runner.setup())
+    await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", 8080)
-    loop.run_until_complete(site.start())
+    await site.start()
 
-    app.run_polling()
+    await app.run_polling()
 
+# Entry point
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
