@@ -1,189 +1,204 @@
 import random
 import asyncio
 from datetime import datetime
-from pytz import timezone
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from aiohttp import web
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes
 )
-import easy  # Easy questions
-import hard  # Hard questions
-from keep_alive import keep_alive
+from easy import questions as easy_questions
+from hard import questions as hard_questions
 
-BOT_TOKEN = "7514879612:AAFK9LcbgsseNTJgguf9vWoNYEpvSZIE6LQ"
-GROUP_USERNAME = "swygenbd"
-ADMIN_IDS = [6243881362]  # আপনার টেলিগ্রাম ইউজার আইডি
-user_data = {}
-BD_TZ = timezone('Asia/Dhaka')
-user_data = {}
+# --- CONFIGURATION ---
+BOT_TOKEN = "7219397761:AAGzeEKdvR8tc1DkH0zoYtrdxYH8J5eS3Jw"
+GROUP_USERNAME = "@swygenbd"
+ADMIN_ID = 6243881362  # Replace with your Telegram user ID
 
-def load_questions(difficulty):
-    if difficulty == "easy":
-        return easy.questions_easy
-    elif difficulty == "hard":
-        return hard.questions_hard
-    return []
+# --- Keep Alive (Web Server) ---
+async def handle(request):
+    return web.Response(text="Bot is alive")
 
+def keep_alive():
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    return runner
+
+# --- Main Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    try:
-        member = await context.bot.get_chat_member(f"@{GROUP_USERNAME}", user.id)
-        if member.status in ['member', 'administrator', 'creator']:
-            await send_main_menu(update)
-        else:
-            raise Exception("Not a member")
-    except:
-        join_btn = InlineKeyboardMarkup([
-            [InlineKeyboardButton("গ্রুপে যোগ দিন", url=f"https://t.me/{GROUP_USERNAME}")],
-        ])
-        await update.message.reply_text("Quiz খেলতে হলে আমাদের গ্রুপে যোগ দিতে হবে:", reply_markup=join_btn)
+    chat_member = await context.bot.get_chat_member(GROUP_USERNAME, user.id)
 
-async def send_main_menu(update):
-    keyboard = [
-        [InlineKeyboardButton("🟢 Easy Quiz", callback_data="start_easy")],
-        [InlineKeyboardButton("🔴 Hard Quiz", callback_data="start_hard")],
-        [InlineKeyboardButton("📊 রিপোর্ট", callback_data="daily_report")],
-        [InlineKeyboardButton("✉️ ফিডব্যাক পাঠান", url="https://t.me/Swygen_bd")]
-    ]
-    await update.message.reply_text("Quiz শুরু করতে নিচের অপশনগুলো থেকে একটি বেছে নিন:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    difficulty = query.data.split("_")[1]
-    user_id = query.from_user.id
-    all_questions = load_questions(difficulty)
-    asked_ids = user_data.get(user_id, {}).get("asked_ids", set())
-    questions = [q for q in all_questions if q["question"] not in asked_ids]
-    random.shuffle(questions)
-    user_data[user_id] = {
-        "questions": questions,
-        "score": 0,
-        "index": 0,
-        "difficulty": difficulty,
-        "answered": False,
-        "asked_ids": asked_ids
-    }
-    await send_question(context, query.message.chat_id, user_id)
-
-async def send_question(context, chat_id, user_id):
-    user = user_data[user_id]
-    if user["index"] >= len(user["questions"]):
-        await context.bot.send_message(chat_id, f"✅ Quiz শেষ!\nআপনার স্কোর: {user['score']} / {len(user['questions'])}")
+    if chat_member.status not in ['member', 'administrator', 'creator']:
+        join_keyboard = InlineKeyboardMarkup(
+            InlineKeyboardButton("✅ Joined", callback_data="check_joined")
+        )
+        await update.message.reply_text(
+            "দয়া করে আমাদের গ্রুপে যোগ দিন তারপর Start করুন:",
+            reply_markup=join_keyboard
+        )
         return
 
-    q = user["questions"][user["index"]]
-    options = q["options"]
-    random.shuffle(options)
-    buttons = [[InlineKeyboardButton(opt, callback_data=f"answer|{opt}")] for opt in options]
-    user["correct"] = q["answer"]
-    user["answered"] = False
-    user["asked_ids"].add(q["question"])
+    keyboard = [
+        [InlineKeyboardButton("Easy Quiz", callback_data='easy_quiz')],
+        [InlineKeyboardButton("Hard Quiz", callback_data='hard_quiz')],
+        [InlineKeyboardButton("Report", callback_data='report')],
+        [InlineKeyboardButton("Feedback", callback_data='feedback')]
+    ]
+    await update.message.reply_text(
+        f"স্বাগতম {user.first_name}!\n\nএখানে আপনি কুইজ খেলে শিখতে পারবেন।",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def check_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    chat_member = await context.bot.get_chat_member(GROUP_USERNAME, user.id)
+
+    if chat_member.status in ['member', 'administrator', 'creator']:
+        await start(update, context)
+    else:
+        await update.callback_query.answer("আপনি এখনো গ্রুপে যোগ দেননি!", show_alert=True)
+
+async def send_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE, difficulty):
+    questions = easy_questions if difficulty == "easy" else hard_questions
+    question = random.choice(questions)
+    context.user_data['current_question'] = question
+    context.user_data['quiz_start_time'] = datetime.utcnow()
+    context.user_data['last_difficulty'] = difficulty
+
+    options = question['options']
+    keyboard = [[InlineKeyboardButton(opt, callback_data=f"answer|{opt}")] for opt in options]
+
+    msg = await update.callback_query.message.reply_text(
+        f"{question['category']}:\n\n{question['question']}",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+    context.user_data['quiz_message'] = msg.message_id
+    context.user_data['quiz_chat_id'] = msg.chat.id
+
+    asyncio.create_task(countdown_delete(context, msg.chat.id, msg.message_id, 60))
+
+async def countdown_delete(context, chat_id, message_id, seconds):
+    await asyncio.sleep(seconds)
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except:
+        pass
+    context.user_data['current_question'] = None
+    await ask_new_question(context, chat_id)
+
+async def ask_new_question(context, chat_id):
+    user_data = context.user_data
+    difficulty = user_data.get('last_difficulty', 'easy')
+    questions = easy_questions if difficulty == "easy" else hard_questions
+    question = random.choice(questions)
+    user_data['current_question'] = question
+
+    options = question['options']
+    keyboard = [[InlineKeyboardButton(opt, callback_data=f"answer|{opt}")] for opt in options]
 
     msg = await context.bot.send_message(
-        chat_id,
-        f"{q['category']} প্রশ্ন:\n{q['question']}\n\n⏳ সময়: 60 সেকেন্ড",
-        reply_markup=InlineKeyboardMarkup(buttons),
-        parse_mode="Markdown"
+        chat_id=chat_id,
+        text=f"{question['category']}:\n\n{question['question']}",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    user["message_id"] = msg.message_id
 
-    for t in range(59, 0, -1):
-        if user["answered"]:
-            return
-        try:
-            await asyncio.sleep(1)
-            await context.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=msg.message_id,
-                text=f"{q['category']} প্রশ্ন:\n{q['question']}\n\n⏳ সময়: {t} সেকেন্ড",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(buttons)
-            )
-        except:
-            pass
+    user_data['quiz_message'] = msg.message_id
+    user_data['quiz_chat_id'] = msg.chat.id
+    asyncio.create_task(countdown_delete(context, msg.chat.id, msg.message_id, 60))
 
-    if not user["answered"]:
-        await context.bot.delete_message(chat_id, user["message_id"])
-        await context.bot.send_message(chat_id, f"⏰ সময় শেষ!\nসঠিক উত্তর ছিল: {user['correct']}")
-        update_daily_report(user_id, False)
-        user["index"] += 1
-        await asyncio.sleep(1)
-        await send_question(context, chat_id, user_id)
+async def quiz_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query.data == "easy_quiz":
+        await send_quiz(update, context, "easy")
+    elif query.data == "hard_quiz":
+        await send_quiz(update, context, "hard")
 
 async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user_id = query.from_user.id
     selected = query.data.split("|")[1]
-    user = user_data.get(user_id)
+    question = context.user_data.get('current_question')
 
-    if not user or user.get("answered"):
-        await query.answer("এই প্রশ্নে আপনি ইতিমধ্যে উত্তর দিয়েছেন বা টাইম শেষ!", show_alert=True)
+    if not question:
+        await query.answer("কোন প্রশ্ন পাওয়া যায়নি।")
         return
 
-    correct = user["correct"]
-    user["answered"] = True
-    is_correct = selected == correct
+    correct = question['answer']
+    msg = query.message
 
+    new_buttons = []
+    for row in msg.reply_markup.inline_keyboard:
+        new_row = []
+        for button in row:
+            if button.text == correct:
+                new_row.append(InlineKeyboardButton(f"✅ {button.text}", callback_data="disabled"))
+            elif button.text == selected:
+                new_row.append(InlineKeyboardButton(f"❌ {button.text}", callback_data="disabled"))
+            else:
+                new_row.append(InlineKeyboardButton(button.text, callback_data="disabled"))
+        new_buttons.append(new_row)
+
+    await msg.edit_reply_markup(reply_markup=InlineKeyboardMarkup(new_buttons))
+
+    if selected == correct:
+        context.user_data['correct'] = context.user_data.get('correct', 0) + 1
+        await query.answer("সঠিক উত্তর!")
+    else:
+        context.user_data['wrong'] = context.user_data.get('wrong', 0) + 1
+        await query.answer(f"ভুল উত্তর। সঠিক উত্তর: {correct}", show_alert=True)
+
+    await asyncio.sleep(2)
     try:
-        await context.bot.delete_message(chat_id=query.message.chat_id, message_id=user["message_id"])
+        await msg.delete()
     except:
         pass
 
-    if is_correct:
-        user["score"] += 1
-        feedback = f"✅ সঠিক উত্তর!\nআপনার স্কোর: {user['score']}"
-    else:
-        feedback = f"❌ ভুল উত্তর!\nসঠিক উত্তর: {correct}\nআপনার স্কোর: {user['score']}"
+    context.user_data['current_question'] = None
+    await ask_new_question(context, msg.chat.id)
 
-    await context.bot.send_message(query.message.chat_id, feedback)
-    update_daily_report(user_id, is_correct)
-    user["index"] += 1
-    await asyncio.sleep(1)
-    await send_question(context, query.message.chat_id, user_id)
+async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    correct = context.user_data.get('correct', 0)
+    wrong = context.user_data.get('wrong', 0)
+    total = correct + wrong
+    percentage = round((correct / total) * 100) if total > 0 else 0
 
-def update_daily_report(user_id, correct):
-    date = datetime.now(BD_TZ).strftime('%Y-%m-%d')
-    if "report" not in user_data[user_id]:
-        user_data[user_id]["report"] = {}
-    if date not in user_data[user_id]["report"]:
-        user_data[user_id]["report"][date] = {"answered": 0, "correct": 0}
-    user_data[user_id]["report"][date]["answered"] += 1
-    if correct:
-        user_data[user_id]["report"][date]["correct"] += 1
+    await update.callback_query.message.reply_text(
+        f"আপনার রিপোর্ট:\n"
+        f"সঠিক উত্তর: {correct}\n"
+        f"ভুল উত্তর: {wrong}\n"
+        f"সফলতা: {percentage}%"
+    )
 
-async def daily_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-    date = datetime.now(BD_TZ).strftime('%Y-%m-%d')
-    time_now = datetime.now(BD_TZ).strftime('%I:%M %p')
-    report = user_data.get(user_id, {}).get("report", {}).get(date)
+async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text="ধন্যবাদ | Swygen Vai | এইরকম একটা শিক্ষামূলক বট তৈরি করে উপহার দেওয়ার জন্য !"
+    )
+    await update.callback_query.answer("আপনার ফিডব্যাক পাঠানো হয়েছে!")
 
-    if not report:
-        await query.answer("আজকের জন্য কোনো রিপোর্ট নেই!", show_alert=True)
-    else:
-        answered = report["answered"]
-        correct = report["correct"]
-        percentage = round((correct / answered) * 100, 2) if answered > 0 else 0
-        await query.message.reply_text(
-            f"📅 তারিখ: {date}\n🕒 সময়: {time_now}\nউত্তর দিয়েছেন: {answered} টি\nসঠিক উত্তর: {correct} টি\nসফলতা: {percentage}%"
-        )
+# --- Main Entry Point ---
+def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-# Import the keep_alive function to keep the server running
-from keep_alive import keep_alive
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(check_joined, pattern="check_joined"))
+    app.add_handler(CallbackQueryHandler(quiz_handler, pattern="^(easy_quiz|hard_quiz)$"))
+    app.add_handler(CallbackQueryHandler(answer_handler, pattern="^answer\\|"))
+    app.add_handler(CallbackQueryHandler(report_handler, pattern="^report$"))
+    app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^feedback$"))
 
-# Your bot code...
+    runner = keep_alive()
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(runner.setup())
+    site = web.TCPSite(runner, "0.0.0.0", 8080)
+    loop.run_until_complete(site.start())
 
-# Start the server to keep the bot alive
-keep_alive()
+    app.run_polling()
 
-# Start the bot
-app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-# Add handlers for commands
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(start_quiz, pattern="^start_"))
-app.add_handler(CallbackQueryHandler(answer_handler, pattern="^answer\|"))
-app.add_handler(CallbackQueryHandler(daily_report, pattern="^daily_report$"))
-
-print("Bot is running...")
-app.run_polling()
+if __name__ == "__main__":
+    main()
