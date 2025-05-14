@@ -1,4 +1,4 @@
-questions_easy = [
+questions = [
   {
     "category": "ইসলাম",
     "question": "কুরআন শরীফে মোট কতটি সূরা আছে?",
