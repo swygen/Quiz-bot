@@ -18,6 +18,7 @@ GROUP_USERNAME = "@swygenbd"
 ADMIN_ID = 6243881362  # Replace with your Telegram user ID
 
 # --- Keep Alive (Web Server) ---
+from keep_alive import keep_alive
 async def handle(request):
     return web.Response(text="Bot is alive")
 
