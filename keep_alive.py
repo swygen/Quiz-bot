@@ -1,8 +1,12 @@
 from aiohttp import web
 
+async def handle(request):
+    return web.Response(text="Bot is alive!")
+
 async def keep_alive():
     app = web.Application()
-    app.add_routes([web.get("/", lambda request: web.Response(text="Bot is running"))])
+    app.router.add_get("/", handle)
     runner = web.AppRunner(app)
     await runner.setup()
-    return runner
+    site = web.TCPSite(runner, "0.0.0.0", 8080)
+    await site.start()
