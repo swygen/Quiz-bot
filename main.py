@@ -1,12 +1,14 @@
-import random
-import asyncio
+import random, asyncio
 from datetime import datetime
 from pytz import timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
+    MessageHandler, ContextTypes, filters
+)
+from keep_alive import keep_alive  # keep_alive ফাংশন কল করবো নিচে
 import easy
 import hard
-from keep_alive import keep_alive  # Keep the bot alive with Flask
 
 BOT_TOKEN = "7467449022:AAEqnQDusVcovaO6afLaA94P61M70ukG8fo"
 GROUP_USERNAME = "swygenbd"
@@ -30,9 +32,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("🟢 Easy Quiz", callback_data="start_easy")],
                 [InlineKeyboardButton("🔴 Hard Quiz", callback_data="start_hard")],
                 [InlineKeyboardButton("📊 রিপোর্ট", callback_data="daily_report")],
-                [InlineKeyboardButton("✉️ ফিডব্যাক পাঠান", url="https://t.me/YOUR_USERNAME")]
+                [InlineKeyboardButton("✉️ ফিডব্যাক", url="https://t.me/YOUR_USERNAME")]
             ]
-            await update.message.reply_text("Quiz শুরু করতে নিচের অপশনগুলো থেকে একটি বেছে নিন:", reply_markup=InlineKeyboardMarkup(keyboard))
+            await update.message.reply_text("Quiz শুরু করতে অপশন বেছে নিন:", reply_markup=InlineKeyboardMarkup(keyboard))
         else:
             raise Exception("Not a member")
     except:
@@ -40,7 +42,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("গ্রুপে যোগ দিন", url=f"https://t.me/{GROUP_USERNAME}")],
             [InlineKeyboardButton("Joined ✅", callback_data="check_join")]
         ])
-        await update.message.reply_text("Quiz খেলতে হলে আমাদের গ্রুপে যোগ দিতে হবে:", reply_markup=join_btn)
+        await update.message.reply_text("Quiz খেলতে আমাদের গ্রুপে যোগ দিন:", reply_markup=join_btn)
 
 async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -51,9 +53,9 @@ async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("🟢 Easy Quiz", callback_data="start_easy")],
                 [InlineKeyboardButton("🔴 Hard Quiz", callback_data="start_hard")],
                 [InlineKeyboardButton("📊 রিপোর্ট", callback_data="daily_report")],
-                [InlineKeyboardButton("✉️ ফিডব্যাক পাঠান", url="https://t.me/YOUR_USERNAME")]
+                [InlineKeyboardButton("✉️ ফিডব্যাক", url="https://t.me/YOUR_USERNAME")]
             ]
-            await update.callback_query.edit_message_text("Quiz শুরু করতে নিচের অপশন থেকে বেছে নিন:", reply_markup=InlineKeyboardMarkup(keyboard))
+            await update.callback_query.edit_message_text("Quiz শুরু করতে অপশন বেছে নিন:", reply_markup=InlineKeyboardMarkup(keyboard))
         else:
             raise Exception("Not Joined")
     except:
@@ -100,10 +102,9 @@ async def send_question(context, chat_id, user_id):
 
     countdown_text = "⏳ সময়: 60 সেকেন্ড"
     msg = await context.bot.send_message(chat_id, f"*{q['category']} প্রশ্ন:*\n{q['question']}\n\n{countdown_text}",
-                                         reply_markup=InlineKeyboardMarkup(buttons),
-                                         parse_mode="Markdown")
-
+                                         reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
     user["message_id"] = msg.message_id
+
     for t in range(59, 0, -1):
         if user["answered"]:
             return
@@ -141,8 +142,8 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     selected = query.data.split("|")[1]
     user = user_data.get(user_id)
 
-    if not user or user.get("answered") == True:
-        await query.answer("এই প্রশ্নে আপনি উত্তর দিয়েছেন বা টাইম শেষ!", show_alert=True)
+    if not user or user.get("answered"):
+        await query.answer("এই প্রশ্নে আপনি উত্তর দিয়েছেন বা সময় শেষ!", show_alert=True)
         return
 
     correct = user["correct"]
@@ -170,48 +171,40 @@ async def daily_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     report = user_data.get(user_id, {}).get("report", {}).get(date)
 
     if not report:
-        await query.answer("আজকের জন্য কোনো রিপোর্ট নেই!", show_alert=True)
+        await query.answer("আজকের কোনো রিপোর্ট নেই!", show_alert=True)
     else:
         answered = report["answered"]
         correct = report["correct"]
         percentage = round((correct / answered) * 100, 2) if answered > 0 else 0
-        await query.message.reply_text(f"📅 তারিখ: {date}\n🕒 সময়: {time_now}\nউত্তর দিয়েছেন: {answered} টি\nসঠিক উত্তর: {correct} টি\nসফলতা: {percentage}%")
+        await query.message.reply_text(f"📅 তারিখ: {date}\n🕒 সময়: {time_now}\nউত্তর দিয়েছেন: {answered}\nসঠিক: {correct}\nসফলতা: {percentage}%")
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ADMIN_IDS:
-        await update.message.reply_text("আপনার অনুমতি নেই!")
+    if update.effective_user.id not in ADMIN_IDS:
         return
-
-    await update.message.reply_text("নতুন প্রশ্ন যুক্ত করতে এই ফরম্যাটে পাঠান:\n"
-                                    "ক্যাটাগরি|প্রশ্ন|অপশন১,অপশন২,অপশন৩,অপশন৪|সঠিক_উত্তর\n"
-                                    "উদাহরণ:\nবিজ্ঞান|সূর্য কোন গ্যাসে তৈরি?|হাইড্রোজেন,অক্সিজেন,কার্বন,নাইট্রোজেন|হাইড্রোজেন")
+    await update.message.reply_text("নতুন প্রশ্ন যুক্ত করতে:\nবিন্যাস: ক্যাটাগরি|প্রশ্ন|অপশন১,অপশন২,অপশন৩,অপশন৪|সঠিক উত্তর")
 
 async def add_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ADMIN_IDS:
+    if update.effective_user.id not in ADMIN_IDS:
         return
-
     try:
         txt = update.message.text
         parts = txt.split('|')
         if len(parts) != 4:
             raise Exception("Invalid format")
-
         cat, ques, opts, ans = parts
-        question_obj = {
+        q = {
             "category": cat.strip(),
             "question": ques.strip(),
             "options": [o.strip() for o in opts.split(',')],
             "answer": ans.strip()
         }
-        easy.questions_easy.append(question_obj)
+        easy.questions_easy.append(q)
         await update.message.reply_text("✅ প্রশ্ন যুক্ত হয়েছে!")
-    except Exception as e:
-        await update.message.reply_text("❌ ফরম্যাট ভুল। দয়া করে সঠিকভাবে লিখুন।")
+    except:
+        await update.message.reply_text("❌ ফরম্যাট ভুল!")
 
-# Start the Flask app to keep the bot alive
-keep_alive()
+# Bot শুরু
+keep_alive()  # Flask সার্ভার চালু রাখার জন্য
 
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
@@ -223,5 +216,4 @@ app.add_handler(CallbackQueryHandler(answer_handler, pattern="^answer\|"))
 app.add_handler(CallbackQueryHandler(daily_report, pattern="^daily_report$"))
 
 print("Bot is running...")
-
 app.run_polling()
