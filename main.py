@@ -10,7 +10,7 @@ import easy  # Easy questions
 import hard  # Hard questions
 from keep_alive import keep_alive
 
-BOT_TOKEN = "7467449022:AAEqnQDusVcovaO6afLaA94P61M70ukG8fo"
+BOT_TOKEN = "7514879612:AAFK9LcbgsseNTJgguf9vWoNYEpvSZIE6LQ"
 GROUP_USERNAME = "swygenbd"
 ADMIN_IDS = [6243881362]  # আপনার টেলিগ্রাম ইউজার আইডি
 user_data = {}
